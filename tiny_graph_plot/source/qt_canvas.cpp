@@ -48,7 +48,7 @@ void QtCanvas::initializeGL()
 {
     initializeOpenGLFunctions();
     QOpenGLContext* c = context();
-    _text_rend=new tiny_gl_text_renderer::TextRenderer(c);
+
 
     SetXaxisTitle("x axis");
     SetYaxisTitle("y axis", true); // Second argument - rotated by 90deg
@@ -88,12 +88,14 @@ void QtCanvas::initializeGL()
     //SetFontSize(1.0f);
     //SetAllMargins(280, 22, 34, 22);
     // Or use twice as small font and corresponding window margins
-    const float font_k = 0.51f;
+    const float font_k = 1.0f;
     SetFontSize(font_k);
     SetAllMargins((unsigned int)(font_k * 280), (unsigned int)(font_k * 22),
                          (unsigned int)(font_k * 34), (unsigned int)(font_k * 22));
     //resizeGL(_window_w, _window_h);
     //glClearColor(1,0,0,1);
+    _text_rend=new tiny_gl_text_renderer::TextRenderer(c);
+    _text_rend->Init();
     this->Init();
     this->Clear();
     this->Show();
@@ -150,12 +152,17 @@ void QtCanvas::mouseReleaseEvent(QMouseEvent *event)
 
 void QtCanvas::mouseMoveEvent(QMouseEvent *event)
 {
-    qDebug() << "mousemove=" << event;
+    qDebug() << "mousemove, localpos=" << event->localPos();
     switch (_cur_action) {
         qDebug() << "pan=" << event;
-        case action_t::ACT_PAN:    this->Pan(event->pos().x(), event->localPos().y());
+        case action_t::ACT_PAN:
+        this->Pan(event->localPos().x(),
+                  event->localPos().y());
     }
 
+        this->DrawCursor(event->localPos().x(),
+                     event->localPos().y());
+        //this->DrawCircles(xs_, ys_);
 
 }
 
@@ -490,7 +497,7 @@ void QtCanvas::Draw(void) /*const*/ {
     this->SwitchToFullWindow();
     this->UpdateTexAxesValues();
     //++++++++++++++++
-    //_text_rend->Draw();
+    _text_rend->Draw();
     //++++++++++++++++
 }
 
@@ -730,7 +737,7 @@ void QtCanvas::Reshape(int p_width, int p_height) {
     this->SendGridToGPU();
 
     //++++++++++++++++++++++++++++++++++++
-    //_text_rend->Reshape(p_width, p_height);
+    _text_rend->Reshape(p_width, p_height);
     //++++++++++++++++++++++++++++++++++++
 
     const int ch_width = (int)(_font_size * (float)tiny_gl_text_renderer::CHAR_WIDTH);
