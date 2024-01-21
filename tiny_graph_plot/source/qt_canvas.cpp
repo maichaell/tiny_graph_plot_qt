@@ -13,7 +13,7 @@
 #include <QDebug>
 #include <QMouseEvent>
 
-#define DEBUG_CALLS
+//#define DEBUG_CALLS
 #define SET_CONTEXT
 
 using tiny_gl_text_renderer::marker_t;
@@ -114,61 +114,162 @@ void QtCanvas::resizeGL(int w, int h)
 
 void QtCanvas::paintGL()
 {
-    Clear();
-    Draw();
+    this->Clear();
+    this->Draw();
 }
 
 void QtCanvas::mousePressEvent(QMouseEvent *event)
 {
-    if(event->buttons() == Qt::MiddleButton)
-        _cur_action = action_t::ACT_PAN;
+    int button = event->button();
+    int mods = event->modifiers();
+    QPoint pnt = event->pos();
 
-    qDebug() << "buttons=" << event->buttons();
-    qDebug() << "type=" << event->type();
-    qDebug() << "mods=" << event->modifiers();
+    double xs = pnt.x();
+    double ys_inv = event->y();
 
-    qDebug() << "pos" << event->pos();
+    //MIKA:glfwGetCursorPos(_window, &xs, &ys_inv);
+    const double ys = (double)_window_h - ys_inv;
+#ifdef DEBUG_WIN_ACTIONS
+    printf("QtUserWindow::mouse_button_event: % 0.6f\t% 0.6f\n", xs, ys);
+#endif
 
-    /*    if (action == GLFW_PRESS &&
-        button == GLFW_MOUSE_BUTTON_LEFT &&
-        mods == GLFW_MOD_CONTROL) {
+    if (button == Qt::LeftButton &&
+        mods == Qt::ControlModifier) {
         this->UpdateTexTextRef(xs, ys);
         this->UpdateTexTextCur(xs, ys);
         this->Clear();
         this->Draw();
         this->DrawCursor(xs, ys);
         this->DrawCircles(xs, ys);
-        glfwSwapBuffers(_window);
+        // Assuming _window is a pointer to QWindow, use the appropriate function for your case
+        // _window->swapBuffers();
+        // OR if _window is a pointer to QOpenGLWidget, you can call the update function
+        // _window->update();
         return;
     }
-    */
+
+
+        if (!this->PointerInFrame(xs, ys)) return;
+        this->SaveStartState();
+        _xs_start = xs; _ys_start = ys;
+        _xs_prev = xs; _ys_prev = ys;
+        _mouse_moved = false;
+        if (button == Qt::MidButton) {
+            _cur_action = action_t::ACT_PAN;
+        } else if (button == Qt::RightButton) {
+            if (mods == Qt::ShiftModifier) {
+                _cur_action = action_t::ACT_ZOOM_Y;
+            } else if (mods == Qt::ControlModifier) {
+                _cur_action = action_t::ACT_ZOOM_X;
+            } else if (mods == Qt::AltModifier) {
+                _cur_action = action_t::ACT_ZOOM;
+            } else {
+                _cur_action = action_t::ACT_ZOOM_F;
+            }
+        } else if (button == Qt::LeftButton) {
+            if (mods != Qt::ShiftModifier && mods != Qt::ControlModifier &&
+                mods != Qt::AltModifier) {
+                _cur_action = action_t::ACT_RECT;
+            }
+        }
+
+
+        /*qDebug() << "buttons=" << event->buttons();
+        qDebug() << "type=" << event->type();
+        qDebug() << "mods=" << event->modifiers();
+
+        qDebug() << "pos" << event->pos();
+        */
 }
+
+
 
 void QtCanvas::mouseReleaseEvent(QMouseEvent *event)
 {
     qDebug() << "mousrelease=" << event;
-    //this->CenterView(event->pos().x(), event->pos().y());
+        //int action = GLFW_RELEASE;
+        int button = event->button();
+        int xs = event->x();
+        int ys = event->y();
+
+        if (button == Qt::MiddleButton && !_mouse_moved &&
+            _cur_action == action_t::ACT_PAN) {
+            this->CenterView(xs, ys);
+        }
+        if (button == Qt::LeftButton && _mouse_moved &&
+            _cur_action == action_t::ACT_RECT) {
+            this->ZoomTo(_xs_start, _ys_start, xs, ys);
+        }
+        _cur_action = action_t::ACT_NO_ACT;
+        update();
 }
 
 void QtCanvas::mouseMoveEvent(QMouseEvent *event)
 {
-    qDebug() << "mousemove, localpos=" << event->localPos();
-    switch (_cur_action) {
-        qDebug() << "pan=" << event;
-        case action_t::ACT_PAN:
-        this->Pan(event->localPos().x(),
-                  event->localPos().y());
-    }
+        //qDebug() << "mousemove, localpos=" << event->x();
 
-        this->DrawCursor(event->localPos().x(),
-                     event->localPos().y());
-        //this->DrawCircles(xs_, ys_);
+        double ys_inv = event->y();
+        double xs = event->x();
 
+#ifdef SET_CONTEXT
+        //MIKA:glfwMakeContextCurrent(_window);
+#endif
+        const double ys = (double)_window_h - ys_inv;
+#ifdef DEBUG_WIN_ACTIONS
+        printf("QtUserWindow::mouse_pos_event: % 0.6f\t% 0.6f\n", xs, ys);
+#endif
+
+        _mouse_moved = true;
+
+        const int xs_i = (int)xs;
+        const int ys_i = (int)ys;
+
+        switch (_cur_action) {
+        case action_t::ACT_NO_ACT: {
+            double xs_; double ys_;
+            this->ClampToFrame(xs, ys, xs_, ys_);
+            this->UpdateTexTextCur(xs_, ys_);
+            this->Clear();
+            this->Draw();
+            this->DrawCursor(xs_, ys_);
+            this->DrawCircles(xs_, ys_);
+            //glfwSwapBuffers(_window);
+            return;
+            break; }
+        case action_t::ACT_PAN:    this->Pan(xs, ys);
+            break;
+        case action_t::ACT_ZOOM:   this->Zoom(xs, ys);
+            break;
+        case action_t::ACT_ZOOM_F: this->ZoomF(xs, ys);
+            break;
+        case action_t::ACT_ZOOM_X: this->ZoomX(xs, ys);
+            break;
+        case action_t::ACT_ZOOM_Y: this->ZoomY(xs, ys);
+            break;
+        case action_t::ACT_RECT: {
+            this->Clear();
+            this->Draw();
+            this->DrawSelRectangle(_xs_start, _ys_start, xs, ys);
+            //glfwSwapBuffers(_window);
+            return;
+            break; }
+        default:
+            break;
+        }
+
+        _xs_prev = xs; _ys_prev = ys;
+
+        update();
 }
+
 
 void QtCanvas::keyPressEvent(QKeyEvent *event)
 {
-    this->ToggleGraphVisibility(1);
+        qDebug() << "key";
+        this->ResetCamera();
+        update();
+     //   this->window_refresh_event();
+    //this->ToggleGraphVisibility(3);
 }
 
 
@@ -467,7 +568,7 @@ void QtCanvas::Show(void) {
 
 void QtCanvas::Draw(void) /*const*/ {
 #ifdef DEBUG_CALLS
-    printf("Canvas::Draw\n");
+    //printf("Canvas::Draw\n");
 #endif
 #ifdef SET_CONTEXT
     //MIKA glfwMakeContextCurrent(_window);
@@ -962,8 +1063,8 @@ int QtCanvas::SendGridToGPU(void) {
 
     const float vw = (float)(_window_w - (unsigned int)(_margin_xl_pix + _margin_xr_pix));
     const float vh = (float)(_window_h - (unsigned int)(_margin_yb_pix + _margin_yt_pix));
-    printf("Canvas::SendGridToGPU vw=%f\n", vw);
-    printf("Canvas::SendGridToGPU vh=%f\n", vh);
+    //printf("Canvas::SendGridToGPU vw=%f\n", vw);
+    //printf("Canvas::SendGridToGPU vh=%f\n", vh);
     if (_grid.CalculateStep(_visible_range, vw, vh) == 1) {
         // The range is degenerate
         //TODO decide what to do
@@ -1019,7 +1120,7 @@ int QtCanvas::SendGridToGPU(void) {
 
 void QtCanvas::DrawGrid(void) {
 #ifdef DEBUG_CALLS
-    printf("Canvas::DrawGrid\n");
+    //printf("Canvas::DrawGrid\n");
 #endif
 #ifdef SET_CONTEXT
     //MIKA glfwMakeContextCurrent(_window);
@@ -1044,7 +1145,7 @@ void QtCanvas::DrawGrid(void) {
             // Fine grid
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _iboID_grid_w);
             glEnable(GL_LINE_STIPPLE);
-            glLineStipple(1, 0x0101);
+            //glLineStipple(1, 0x0101);
             glLineWidth(_grid.GetVGridFineLineWidth());
             glDrawElements(GL_LINES, 2 * n_wires_fine_x, GL_UNSIGNED_INT, NULL);
             glDisable(GL_LINE_STIPPLE);
@@ -1057,7 +1158,7 @@ void QtCanvas::DrawGrid(void) {
             // Fine grid
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _iboID_grid_w);
             glEnable(GL_LINE_STIPPLE);
-            glLineStipple(1, 0x0101);
+            //glLineStipple(1, 0x0101);
             glLineWidth(_grid.GetHGridFineLineWidth());
             glDrawElements(GL_LINES, 2 * n_wires_fine_y, GL_UNSIGNED_INT,
                 (GLvoid*)((size_t)(n_wires_fine_x) * sizeof(wire_t)));
@@ -1078,7 +1179,7 @@ void QtCanvas::DrawGrid(void) {
 
 void QtCanvas::DrawAxes(void) {
 #ifdef DEBUG_CALLS
-    printf("Canvas::DrawAxes\n");
+    //printf("Canvas::DrawAxes\n");
 #endif
 #ifdef SET_CONTEXT
     //MIKA glfwMakeContextCurrent(_window);
@@ -1403,8 +1504,8 @@ void QtCanvas::DrawCursor(const double xs, const double ys) {
         glUseProgram(_progID_onscr_w);
         glBindVertexArray(_vaoID_cursor);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _iboID_cursor_onscr_w);
-        glEnable(GL_LINE_STIPPLE);
-        glLineStipple(1, 0x00FF);
+        //glEnable(GL_LINE_STIPPLE);
+        //glLineStipple(1, 0x00FF);
         glLineWidth(_cursor_line_width);
         glDrawElements(GL_LINES, 2 * n_wires, GL_UNSIGNED_INT, NULL);
         glDisable(GL_LINE_STIPPLE);
